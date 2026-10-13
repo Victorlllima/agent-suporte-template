@@ -1,0 +1,28 @@
+{
+  "name": "agent-suporte-template",
+  "version": "0.1.0",
+  "description": "Template de agente de suporte/assistente operacional via WhatsApp da GenixTech — orquestrador + sub-agentes delegados, memória episódica e confirmação administrativa, sobre o @genixtech/agent-core.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "tsx src/agente.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
+    "@genixtech/agent-core": "github:Victorlllima/agent-core-template"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "tsx": "^4.20.6",
+    "@types/node": "^22.10.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Victorlllima/agent-suporte-template.git"
+  },
+  "license": "UNLICENSED",
+  "private": false
+}
