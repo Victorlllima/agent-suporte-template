@@ -14,13 +14,20 @@ de orquestração extraídos do Bia2 (Bioete, Grupo MPF) e da camada administrat
   registros com id estável (`P-001`, `L-002`) em vez de poluir o histórico de chat.
 - **`admin.ts`** — camada administrativa: qualquer ação de escrita que um admin peça passa por
   `propor`/`confirmar` (do core), e só quem está marcado `ehAdmin` pode propor.
-- **`agente.ts`** — esqueleto do loop principal, já ligando anti-loop, debounce, controle de IA
-  e memória do core.
+- **`agente.ts`** — esqueleto do loop principal, já ligando anti-loop, debounce, controle de IA,
+  memória e integrações externas (Composio) do core. **Um processo único atende todos os
+  clientes** — isolamento vem de `tenantId` em toda chamada, não de rodar um processo por
+  cliente. Se `COMPOSIO_API_KEY` estiver definida, o agente oferece ao modelo só os toolkits que
+  aquele tenant habilitou no onboarding (`TenantToolkitsEmProcesso`), chama a ferramenta pela
+  conexão daquele tenant (`ComposioClient.executarFerramenta`) e devolve o resultado pro modelo
+  antes da resposta final.
 
 ## O que é TODO de propósito
 
-Persona, sub-agentes reais (ERP, orçamento, tarefas), adaptador de canal WhatsApp e
-`SessionStore` persistente — específico de cada cliente/projeto.
+Persona, sub-agentes reais (ERP, orçamento, tarefas), adaptador de canal WhatsApp,
+`SessionStore`/`TenantToolkitStore`/`AuthConfigStore` persistentes, e o catálogo real de schemas
+de ferramenta por toolkit (`FERRAMENTAS_DISPONIVEIS` em `agente.ts` só tem Calendar, de exemplo)
+— específico de cada cliente/projeto.
 
 ## Como começar um projeto novo a partir daqui
 
