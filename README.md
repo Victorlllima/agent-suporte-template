@@ -21,6 +21,11 @@ de orquestração extraídos do Bia2 (Bioete, Grupo MPF) e da camada administrat
   aquele tenant habilitou no onboarding (`TenantToolkitsEmProcesso`), chama a ferramenta pela
   conexão daquele tenant (`ComposioClient.executarFerramenta`) e devolve o resultado pro modelo
   antes da resposta final.
+- **Grupo de WhatsApp** (`receberMensagemDeGrupo` em `agente.ts`, sobre o `grupo-contexto` do
+  core) — o agente só responde quando é marcado (nome, @menção, resposta a ele ou comando `/`),
+  mas toda mensagem do grupo fica registrada; quando marcado, ele recebe tudo o que foi dito
+  desde a última leitura dele (inclusive as próprias respostas) e responde no contexto. O grupo
+  inteiro compartilha uma sessão. Preencha `NOMES_DO_AGENTE` e `IDS_DO_AGENTE`.
 
 ## O que é TODO de propósito
 

@@ -20,6 +20,8 @@
  *  - FERRAMENTAS_DISPONIVEIS abaixo é ilustrativo (só Calendar). Em produção,
  *    busque o schema de cada tool habilitada via referência de tools da
  *    Composio em vez de declarar à mão.
+ *  - Em grupo: troque DiarioGrupoEmProcesso por persistência real e preencha
+ *    NOMES_DO_AGENTE / IDS_DO_AGENTE (ver receberMensagemDeGrupo).
  *  - O loop de tool_use abaixo só dá UMA rodada (chama a ferramenta, devolve
  *    o resultado, pede resposta final). Um agente real pode precisar de mais
  *    de uma chamada de ferramenta por turno.
@@ -30,10 +32,13 @@ import {
   AntiLoop,
   AuthConfigsEmProcesso,
   ComposioClient,
+  ContextoGrupo,
   DebounceConversa,
+  DiarioGrupoEmProcesso,
   IaControl,
   MemoriaEmProcesso,
   TenantToolkitsEmProcesso,
+  deveResponder,
   montarSystemCacheado,
 } from "@genixtech/agent-core";
 import { CamadaAdministrativa } from "./admin.js";
@@ -80,7 +85,24 @@ orquestrador.registrar(new SubAgenteEco());
 const composio = process.env.COMPOSIO_API_KEY ? new ComposioClient(process.env.COMPOSIO_API_KEY, new AuthConfigsEmProcesso()) : null;
 const toolkitsHabilitados = new TenantToolkitsEmProcesso();
 
-async function processarMensagem(solicitante: Solicitante, messageId: string, texto: string): Promise<string | null> {
+// Grupo: responde só quando marcado, mas lê tudo desde a última leitura.
+// TODO: troque por persistência real (tabela por tenant+grupo, ou JSONL).
+const contextoGrupo = new ContextoGrupo(new DiarioGrupoEmProcesso());
+// TODO: nome(s) pelo qual o grupo chama o agente e os ids dele no canal (JID/LID).
+const NOMES_DO_AGENTE: (string | RegExp)[] = ["Assistente"];
+const IDS_DO_AGENTE: string[] = [];
+
+/**
+ * @param contextoExtra bloco que o modelo vê junto da mensagem neste turno
+ *   (ex.: o diff do grupo), mas que NÃO vai para o histórico salvo — senão o
+ *   histórico repete a conversa do grupo a cada menção.
+ */
+async function processarMensagem(
+  solicitante: Solicitante,
+  messageId: string,
+  texto: string,
+  contextoExtra?: string,
+): Promise<string | null> {
   const decisao = antiLoop.avaliar(solicitante.telefone, messageId);
   if (!decisao.aceitar) return null;
 
@@ -97,7 +119,8 @@ async function processarMensagem(solicitante: Solicitante, messageId: string, te
   const toolkitsDoTenant = composio ? await toolkitsHabilitados.listarHabilitados(solicitante.tenantId) : [];
   const tools = toolkitsDoTenant.map((slug) => FERRAMENTAS_DISPONIVEIS[slug]).filter((t): t is Anthropic.Tool => !!t);
 
-  const mensagens: Anthropic.MessageParam[] = [...historico, { role: "user", content: texto }];
+  const conteudoTurno = contextoExtra ? `${contextoExtra}\n\n[Mensagem que te acionou]\n${texto}` : texto;
+  const mensagens: Anthropic.MessageParam[] = [...historico, { role: "user", content: conteudoTurno }];
 
   let resposta = await anthropic.messages.create({
     model: "claude-opus-5-5",
@@ -145,10 +168,68 @@ async function processarMensagem(solicitante: Solicitante, messageId: string, te
 
   await memoria.salvar(
     { tenantId: solicitante.tenantId, conversaId: solicitante.conversaId },
-    [...mensagens, { role: "assistant", content: textoResposta }],
+    [
+      ...historico,
+      { role: "user", content: texto },
+      ...mensagens.slice(historico.length + 1),
+      { role: "assistant", content: textoResposta },
+    ],
   );
 
   return textoResposta;
+}
+
+export interface MensagemDeGrupoRecebida {
+  grupoId: string;
+  messageId: string;
+  /** Texto, ou a transcrição do áudio. */
+  texto: string;
+  /** JIDs marcados com @ na mensagem. */
+  mencionados?: string[];
+  /** true se é resposta (citação) a uma mensagem do agente. */
+  respondendoAoAgente?: boolean;
+  midia?: string;
+  citando?: string;
+}
+
+/**
+ * Chame para TODA mensagem que chegar num grupo — não só as que marcam o
+ * agente. Todas entram no diário; só as que chamam o agente geram resposta,
+ * e essa resposta vê tudo o que foi dito desde a última leitura.
+ *
+ * O grupo inteiro compartilha uma sessão (conversaId = grupoId), para o
+ * agente manter o fio da conversa entre quem o chama.
+ */
+async function receberMensagemDeGrupo(solicitante: Solicitante, msg: MensagemDeGrupoRecebida): Promise<string | null> {
+  const chave = { tenantId: solicitante.tenantId, grupoId: msg.grupoId };
+  await contextoGrupo.registrar(chave, {
+    id: msg.messageId,
+    autor: solicitante.nome ?? solicitante.telefone,
+    texto: msg.texto,
+    midia: msg.midia,
+    citando: msg.citando,
+  });
+
+  const chamado = deveResponder({
+    texto: msg.texto,
+    mencionados: msg.mencionados,
+    idsAgente: IDS_DO_AGENTE,
+    respondendoAoAgente: msg.respondendoAoAgente,
+    padroes: NOMES_DO_AGENTE,
+  });
+  if (!chamado) return null;
+
+  const leitura = await contextoGrupo.lerDesdeUltimaLeitura(chave);
+  const resposta = await processarMensagem(
+    { ...solicitante, conversaId: msg.grupoId },
+    msg.messageId,
+    msg.texto,
+    leitura.contexto,
+  );
+
+  // O agente precisa ver o que ele mesmo já disse na próxima leitura.
+  if (resposta) await contextoGrupo.registrar(chave, { autor: "agente", texto: resposta, doAgente: true });
+  return resposta;
 }
 
 // TODO: substitua por um webhook real (Express/Fastify).
@@ -156,4 +237,4 @@ const debounce = new DebounceConversa(async (conversaId: string, mensagemJunta: 
   console.log(`[agente] processar conversa ${conversaId}:`, mensagemJunta);
 });
 
-export { processarMensagem, debounce, admin, episodica, orquestrador };
+export { processarMensagem, receberMensagemDeGrupo, debounce, admin, episodica, orquestrador };
